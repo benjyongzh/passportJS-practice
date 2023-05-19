@@ -5,6 +5,7 @@ const passport = require("passport");
 const LocalStrategy = require("passport-local").Strategy;
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
+const bcrypt = require("bcryptjs");
 
 //========================== DB connect ==========================
 require("dotenv").config();
@@ -34,13 +35,30 @@ passport.use(
   new LocalStrategy(async (username, password, done) => {
     try {
       const user = await User.findOne({ username: username });
+
+      //check username
       if (!user) {
         return done(null, false, { message: "Incorrect username" });
       }
-      if (user.password !== password) {
-        return done(null, false, { message: "Incorrect password" });
-      }
-      return done(null, user);
+
+      //check password
+      bcrypt.compare(password, user.password, (err, res) => {
+        if (err) {
+          console.log("error in bcrypt compare: " + err);
+          return done(err);
+        }
+        if (res) {
+          //password matches. log in
+          console.log("passwords match");
+          return done(null, user);
+        } else {
+          //password no match
+          console.log("passwords do not match");
+          return done(null, false, { message: "Incorrect password" });
+        }
+      });
+
+      return;
     } catch (err) {
       return done(err);
     }
@@ -64,6 +82,12 @@ app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.urlencoded({ extended: false }));
 
+// ========================= use locals ============================
+app.use(function (req, res, next) {
+  res.locals.currentUser = req.user;
+  next();
+});
+
 //========================== routes ==========================
 app.get("/", (req, res) => {
   res.render("index", { user: req.user });
@@ -77,12 +101,15 @@ app.post("/sign-up", async (req, res, next) => {
   //validate and sanitize form here
 
   try {
-    const user = new User({
-      username: req.body.username,
-      password: req.body.password,
+    bcrypt.hash(req.body.password, 10, async (err, hashedPassword) => {
+      const user = new User({
+        username: req.body.username,
+        password: hashedPassword,
+      });
+      const result = await user.save();
+
+      res.redirect("/");
     });
-    const result = await user.save();
-    res.redirect("/");
   } catch (err) {
     return next(err);
   }
